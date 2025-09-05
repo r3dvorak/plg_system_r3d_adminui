@@ -6,7 +6,7 @@
  * @author      Richard Dvorak, r3d.de
  * @copyright   Copyright (C) 2025 Richard Dvorak, https://r3d.de
  * @license     GNU GPL v3 or later (https://www.gnu.org/licenses/gpl-3.0.html)
- * @version     5.0.2
+ * @version     5.0.5
  * @file        plugins/system/r3d_adminui/r3d_adminui.php
  */
 
@@ -15,30 +15,24 @@ defined('_JEXEC') or die;
 use Joomla\CMS\Factory;
 use Joomla\CMS\Plugin\CMSPlugin;
 
-/**
- * Admin-side UI helpers for R3D extensions.
- * Hides Intermediate/Advanced tabs on the mod_r3d_pannellum edit form based on Setup Level.
- */
 final class PlgSystemR3d_adminui extends CMSPlugin
 {
     protected $app;
 
     public function onBeforeCompileHead(): void
     {
-        // Only in administrator app
         if (!$this->app->isClient('administrator')) {
             return;
         }
 
-        $input = $this->app->getInput();
-
-        // Only on module edit view
-        if ($input->getCmd('option') !== 'com_modules' || $input->getCmd('view') !== 'module') {
+        $in = $this->app->getInput();
+        if ($in->getCmd('option') !== 'com_modules' || $in->getCmd('view') !== 'module') {
             return;
         }
 
-        // Ensure it's our module (mod_r3d_pannellum) when editing an existing one
-        $id = $input->getInt('id');
+        // Detect our module for both new & edit forms
+        $isOurs = false;
+        $id = $in->getInt('id');
         if ($id) {
             $db = Factory::getContainer()->get('DatabaseDriver');
             $query = $db->getQuery(true)
@@ -46,90 +40,107 @@ final class PlgSystemR3d_adminui extends CMSPlugin
                 ->from('#__modules')
                 ->where('id = ' . (int) $id);
             $db->setQuery($query);
-            if ((string) $db->loadResult() !== 'mod_r3d_pannellum') {
-                return;
-            }
+            $isOurs = ((string) $db->loadResult() === 'mod_r3d_pannellum');
+        } else {
+            $isOurs = ($in->getCmd('module') === 'mod_r3d_pannellum'); // "New" module
+        }
+        if (!$isOurs) {
+            return;
         }
 
-        // Robust JS: match tabs by visible title (EN/DE), hide tab + pane, switch if hidden tab was active
         $js = <<<'JS'
 (function(){
-  function norm(t){ return (t||'').toLowerCase().replace(/\s+/g,' ').trim(); }
-  var titlesInter = ['intermediate settings','intermediate','intermediateeinstellungen','intermediate-einstellungen'];
-  var titlesAdv   = ['advanced settings','advanced','erweiterte einstellungen','advanced-einstellungen'];
+  function $(sel, root){ return (root||document).querySelector(sel); }
+  function $all(sel, root){ return Array.prototype.slice.call((root||document).querySelectorAll(sel)); }
 
-  function isInterTitle(t){ t = norm(t); return titlesInter.some(function(x){ return t === x; }); }
-  function isAdvTitle(t){ t = norm(t); return titlesAdv.some(function(x){ return t === x; }); }
-
-  function findSetupSelect(){
+  function getSetupSelect(){
     return document.querySelector('[name="jform[params][setup_level]"]');
   }
 
-  function getTabs(){
-    var anchors = Array.prototype.slice.call(document.querySelectorAll('.nav-tabs a[data-bs-toggle="tab"]'));
-    return anchors.map(function(a){
-      var txt = a.textContent || a.innerText || '';
-      var paneId = a.getAttribute('aria-controls') || (a.getAttribute('href')||'').replace('#','');
-      var li = a.closest('li') || a.parentElement;
-      var pane = paneId ? document.getElementById(paneId) : null;
-      return {a:a, li:li, pane:pane, text:txt};
+  function getMainTab(){
+    // Prefer the canonical ID Joomla uses on module edit
+    return document.querySelector('joomla-tab#myTab') || document.querySelector('joomla-tab');
+  }
+
+  function getTopTabButtons(){
+    var tab = getMainTab();
+    if (!tab) return [];
+    var tablist = tab.querySelector('[role="tablist"]');
+    if (!tablist) return [];
+    // Buttons (or anchors) that control panes via aria-controls
+    return $all('[role="tab"][aria-controls]', tablist).map(function(el){
+      var targetId = el.getAttribute('aria-controls') || '';
+      var pane = targetId ? document.getElementById(targetId) : null;
+      return { el: el, targetId: (targetId||'').toLowerCase(), pane: pane };
     });
   }
 
-  function firstVisibleTabLink(){
-    var anchors = document.querySelectorAll('.nav-tabs a[data-bs-toggle="tab"]');
-    for (var i=0;i<anchors.length;i++){
-      var a = anchors[i];
-      var li = a.closest('li') || a.parentElement;
-      if (!li) continue;
-      if (li.style.display !== 'none') return a;
+  function isActive(ctrl){
+    return ctrl && (ctrl.el.getAttribute('aria-selected') === 'true' || ctrl.el.classList.contains('active'));
+  }
+
+  function firstVisible(ctrls){
+    for (var i=0;i<ctrls.length;i++){
+      var c = ctrls[i];
+      if (c.el.style.display !== 'none') return c;
     }
     return null;
   }
 
   function toggleTabs(){
-    var sel = findSetupSelect();
+    var sel = getSetupSelect();
     if (!sel) return;
-    var val = sel.value;
 
-    var tabs = getTabs();
-    tabs.forEach(function(t){
+    var level = sel.value; // 'basic' | 'intermediate' | 'advanced'
+    var ctrls = getTopTabButtons();
+    if (!ctrls.length) return;
+
+    ctrls.forEach(function(c){
+      var id = c.targetId; // e.g. 'general', 'assignment', 'attrib-intermediate', 'attrib-advanced', 'permissions'
+      var isInter = /(^|-)intermediate$/.test(id);
+      var isAdv   = /(^|-)advanced$/.test(id);
+
       var hide = false;
-      if (val === 'basic') {
-        hide = isInterTitle(t.text) || isAdvTitle(t.text);
-      } else if (val === 'intermediate') {
-        hide = isAdvTitle(t.text);
-      } // advanced -> show all
+      if (level === 'basic') {
+        hide = isInter || isAdv;
+      } else if (level === 'intermediate') {
+        hide = isAdv;
+      } // advanced => show all
 
-      if (t.li)   t.li.style.display = hide ? 'none' : '';
-      if (t.pane) t.pane.style.display = hide ? 'none' : '';
+      c.el.style.display = hide ? 'none' : '';
+      if (c.pane) c.pane.style.display = hide ? 'none' : '';
 
-      var isActive = t.a.classList.contains('active') || t.a.getAttribute('aria-selected') === 'true';
-      if (hide && isActive) {
-        var first = firstVisibleTabLink();
-        if (first && typeof first.click === 'function') first.click();
+      if (hide && isActive(c)) {
+        // switch to first visible (ideally "general")
+        var next = ctrls.find(function(x){ return x.targetId === 'general' && x.el.style.display !== 'none'; }) || firstVisible(ctrls);
+        if (next && typeof next.el.click === 'function') {
+          next.el.click();
+        }
       }
     });
   }
 
-  function setup(){
-    var sel = findSetupSelect();
+  function boot(){
+    var sel = getSetupSelect();
     if (!sel) return;
-    sel.addEventListener('change', toggleTabs);
-    toggleTabs();
 
-    var nav = document.querySelector('.nav-tabs');
-    if (nav && window.MutationObserver) {
+    sel.addEventListener('change', toggleTabs);
+
+    // Run now and again after Joomla finishes enhancing the form
+    toggleTabs();
+    setTimeout(toggleTabs, 150);
+    setTimeout(toggleTabs, 400);
+    setTimeout(toggleTabs, 900);
+
+    // Observe mutations on the main tab to re-apply (defensive)
+    var mainTab = getMainTab();
+    if (mainTab && window.MutationObserver) {
       var mo = new MutationObserver(function(){ setTimeout(toggleTabs, 0); });
-      mo.observe(nav, {childList:true, subtree:true, attributes:true});
+      mo.observe(mainTab, {childList:true, subtree:true, attributes:true});
     }
   }
 
-  document.addEventListener('DOMContentLoaded', function(){
-    setTimeout(setup, 0);
-    setTimeout(toggleTabs, 200);
-    setTimeout(toggleTabs, 600);
-  });
+  document.addEventListener('DOMContentLoaded', boot);
 })();
 JS;
 

@@ -2,7 +2,7 @@
 <extension type="plugin" group="system" method="upgrade" version="5.0">
     <name>plg_system_r3d_adminui</name>
     <author>R3D Internet Dienstleistungen</author>
-    <version>5.0.3</version>
+    <version>5.0.5</version>
     <description>Admin UI helpers for R3D extensions.</description>
 
     <files>
