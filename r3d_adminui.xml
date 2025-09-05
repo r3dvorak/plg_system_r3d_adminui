@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<extension type="plugin" group="system" method="upgrade" version="5.0">
+    <name>plg_system_r3d_adminui</name>
+    <author>R3D Internet Dienstleistungen</author>
+    <version>5.0.0</version>
+    <description>Admin UI helpers for R3D extensions.</description>
+
+    <files>
+        <filename plugin="r3d_adminui">r3d_adminui.php</filename>
+    </files>
+
+    <languages>
+        <language tag="en-GB">language/en-GB/en-GB.plg_system_r3d_adminui.ini</language>
+        <language tag="de-DE">language/de-DE/de-DE.plg_system_r3d_adminui.ini</language>
+    </languages>
+</extension>
