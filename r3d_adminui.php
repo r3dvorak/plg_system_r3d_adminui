@@ -6,7 +6,7 @@
  * @author      Richard Dvorak, r3d.de
  * @copyright   Copyright (C) 2025 Richard Dvorak, https://r3d.de
  * @license     GNU GPL v3 or later (https://www.gnu.org/licenses/gpl-3.0.html)
- * @version     5.0.1
+ * @version     5.0.2
  * @file        plugins/system/r3d_adminui/r3d_adminui.php
  */
 
@@ -15,25 +15,32 @@ defined('_JEXEC') or die;
 use Joomla\CMS\Factory;
 use Joomla\CMS\Plugin\CMSPlugin;
 
+/**
+ * Admin-side UI helpers for R3D extensions.
+ * Hides Intermediate/Advanced tabs on the mod_r3d_pannellum edit form based on Setup Level.
+ */
 final class PlgSystemR3d_adminui extends CMSPlugin
 {
     protected $app;
 
     public function onBeforeCompileHead(): void
     {
+        // Only in administrator app
         if (!$this->app->isClient('administrator')) {
             return;
         }
 
         $input = $this->app->getInput();
+
+        // Only on module edit view
         if ($input->getCmd('option') !== 'com_modules' || $input->getCmd('view') !== 'module') {
             return;
         }
 
-        // If editing an existing module, ensure it's our module type
+        // Ensure it's our module (mod_r3d_pannellum) when editing an existing one
         $id = $input->getInt('id');
         if ($id) {
-            $db    = Factory::getContainer()->get('DatabaseDriver');
+            $db = Factory::getContainer()->get('DatabaseDriver');
             $query = $db->getQuery(true)
                 ->select($db->quoteName('module'))
                 ->from('#__modules')
@@ -44,16 +51,15 @@ final class PlgSystemR3d_adminui extends CMSPlugin
             }
         }
 
-        $js = <<<JS
+        // Robust JS: match tabs by visible title (EN/DE), hide tab + pane, switch if hidden tab was active
+        $js = <<<'JS'
 (function(){
-  function norm(t){ return (t||'').toLowerCase().replace(/\\s+/g,' ').trim(); }
-
-  // Accept EN/DE titles
+  function norm(t){ return (t||'').toLowerCase().replace(/\s+/g,' ').trim(); }
   var titlesInter = ['intermediate settings','intermediate','intermediateeinstellungen','intermediate-einstellungen'];
   var titlesAdv   = ['advanced settings','advanced','erweiterte einstellungen','advanced-einstellungen'];
 
-  function isInterTitle(t){ t = norm(t); return titlesInter.some(x => t === x); }
-  function isAdvTitle(t){ t = norm(t); return titlesAdv.some(x => t === x); }
+  function isInterTitle(t){ t = norm(t); return titlesInter.some(function(x){ return t === x; }); }
+  function isAdvTitle(t){ t = norm(t); return titlesAdv.some(function(x){ return t === x; }); }
 
   function findSetupSelect(){
     return document.querySelector('[name="jform[params][setup_level]"]');
@@ -93,14 +99,11 @@ final class PlgSystemR3d_adminui extends CMSPlugin
         hide = isInterTitle(t.text) || isAdvTitle(t.text);
       } else if (val === 'intermediate') {
         hide = isAdvTitle(t.text);
-      } else { // advanced
-        hide = false;
-      }
+      } // advanced -> show all
 
       if (t.li)   t.li.style.display = hide ? 'none' : '';
       if (t.pane) t.pane.style.display = hide ? 'none' : '';
 
-      // If we hide the active tab, jump to first visible
       var isActive = t.a.classList.contains('active') || t.a.getAttribute('aria-selected') === 'true';
       if (hide && isActive) {
         var first = firstVisibleTabLink();
@@ -115,7 +118,6 @@ final class PlgSystemR3d_adminui extends CMSPlugin
     sel.addEventListener('change', toggleTabs);
     toggleTabs();
 
-    // Re-run if the tabs area changes (defensive)
     var nav = document.querySelector('.nav-tabs');
     if (nav && window.MutationObserver) {
       var mo = new MutationObserver(function(){ setTimeout(toggleTabs, 0); });
@@ -124,17 +126,11 @@ final class PlgSystemR3d_adminui extends CMSPlugin
   }
 
   document.addEventListener('DOMContentLoaded', function(){
-    // Sometimes the form takes a tick to initialize
     setTimeout(setup, 0);
     setTimeout(toggleTabs, 200);
     setTimeout(toggleTabs, 600);
   });
 })();
-JS;
-
-        Factory::getDocument()->addScriptDeclaration($js);
-    }
-}
 JS;
 
         Factory::getDocument()->addScriptDeclaration($js);
